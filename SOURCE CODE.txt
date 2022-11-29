@@ -1,0 +1,351 @@
+﻿TUGAS 1: ERD & DATA PREPARATION
+
+
+ALTER TABLE order_items_dataset ADD FOREIGN KEY (product_id)
+REFERENCES products_dataset(product_id) 
+– adding foreign key (product_id) from products_dataset to order_items_dataset 
+;
+ALTER TABLE order_items_dataset ADD FOREIGN KEY (order_id)
+REFERENCES orders_dataset(order_id)
+– adding foreign key (order_id) from orders_dataset to order_items_dataset 
+;
+ALTER TABLE order_items_dataset ADD FOREIGN KEY (seller_id)
+REFERENCES sellers_dataset(seller_id)
+– adding foreign key (seller_id) from sellers_dataset to order_items_dataset 
+;
+ALTER TABLE payments_dataset ADD FOREIGN KEY (order_id)
+REFERENCES orders_dataset(order_id)
+– adding foreign key (order_id) from orders_dataset to payments_dataset 
+;
+ALTER TABLE reviews_dataset ADD FOREIGN KEY (order_id)
+REFERENCES orders_dataset(order_id)
+– adding foreign key (order_id) from orders_dataset to reviews_dataset 
+;
+ALTER TABLE orders_dataset ADD FOREIGN KEY (customer_id)
+REFERENCES customers_dataset(customer_id)
+– adding foreign key (customer_id) from customers_dataset to orders_dataset 
+;
+– because of zip_code_prefix isn’t unique in geolocations_dataset and since the only that differs one data from the others in a same zip code is the latitude and longitude, therefore i remove the duplicates and only leaving one data per zip code (easier with using python).
+
+
+Using sql method:
+create table geolocations_dataset as (select geolocation_zip_code_prefix, 
+min(geolocation_lat) as geolocation_lat,
+min(geolocation_lng) as geolocation_lng,
+max(geolocation_city) as geolocation_city,
+max(geolocation_state) as geolocation_state
+from geolocations_dataset2
+group by geolocation_zip_code_prefix)
+;
+
+
+
+
+– adding foreign key (zip_code_prefix) from geolocations_dataset to customers_dataset and sellers_dataset in ERD with option 1 to Many.
+
+
+TUGAS 2: ANNUAL CUSTOMER ACTIVITY GROWTH ANALYSIS
+
+
+create table tabel_transaksi as select c.customer_unique_id, o.order_purchase_timestamp,date_part('year',o.order_purchase_timestamp) as year
+                                        from orders_dataset o
+                                        join customers_dataset c on o.customer_id = c.customer_id
+;                                        
+create table  transaksi_pertama as select customer_unique_id, min(order_purchase_timestamp) as transaksi_pertama
+                from (select o.order_id, o.customer_id, o.order_purchase_timestamp, c.customer_unique_id
+                                from orders_dataset o
+                                join customers_dataset c on o.customer_id = c.customer_id) as ord
+                                group by customer_unique_id
+;
+create table tabel_transaksi_lengkap as
+select ttp.customer_unique_id,year as transaction_year,first_transaction_year,jumlah_transaksi
+from                        (select t.customer_unique_id,year, 
+                                date_part('year',transaksi_pertama) as first_transaction_year 
+                                from tabel_transaksi as t
+                                join transaksi_pertama as tp
+                                on t.customer_unique_id = tp.customer_unique_id) as ttp
+join                         (select customer_unique_id, count(customer_unique_id) as jumlah_transaksi
+                                from tabel_transaksi
+                                group by customer_unique_id) as jt
+on ttp.customer_unique_id = jt.customer_unique_id
+
+
+;
+--Join all tables
+
+
+select tabel_1.year as year, rata_rata_monthly_active_user, jumlah_customer_baru, jumlah_customer_yang_melakukan_repeat_order,rata_rata_frekuensi_order
+from 
+--1. Rata-rata Monthly Active Users (MAU) per Tahun
+(select date_part('year',date_year_month) as year, floor(avg (jumlah_customer)) as rata_rata_monthly_active_user
+from (select date_trunc('month', order_purchase_timestamp) as date_year_month, count(distinct customer_unique_id) as jumlah_customer
+                from (select o.order_id, o.customer_id, o.order_purchase_timestamp, c.customer_unique_id
+                                from orders_dataset o
+                                join customers_dataset c on o.customer_id = c.customer_id) as ord
+                group by 1
+                order by date_year_month) as tabel_per_bulan
+group by year
+order by year) as tabel_1
+
+
+join 
+--2. Jumlah Customer Baru per Tahun
+(select date_part('year',transaksi_pertama) as year, count(distinct customer_unique_id) as jumlah_customer_baru
+from (select customer_unique_id, min(order_purchase_timestamp) as transaksi_pertama
+                from (select o.order_id, o.customer_id, o.order_purchase_timestamp, c.customer_unique_id
+                                from orders_dataset o
+                                join customers_dataset c on o.customer_id = c.customer_id) as ord
+                                group by customer_unique_id) as first_transaction
+group by year) as tabel_2
+on tabel_1.year=tabel_2.year
+
+
+join 
+-- 3. Jumlah Customer yang Melakukan Repeat Order per Tahun
+(select * from(
+------- a. Customers yang repeat order di 2016
+select transaction_year, count(1) as jumlah_customer_yang_melakukan_repeat_order
+                                                                                from (select transaction_year, customer_unique_id, count (customer_unique_id) as jumlah_transaksi_2016
+                                                                                from         (select * from tabel_transaksi_lengkap
+                                                                                where transaction_year = 2016 and first_transaction_year = 2016 and jumlah_transaksi>1) as transaksi_2016
+                                                                                group by (transaction_year, customer_unique_id)
+                                                                                having count (customer_unique_id) > 1) as transaksi_repeat_2017_1
+group by 1
+
+
+UNION ALL
+------- b. Customers yang repeat order di 2017
+select transaction_year, count(1) as jumlah_customer_yang_melakukan_repeat_order
+                                                                                from (select transaction_year, customer_unique_id, count (customer_unique_id) as jumlah_transaksi_2017
+                                                                                from         (select * from tabel_transaksi_lengkap
+                                                                                where transaction_year = 2017 and first_transaction_year = 2017 and jumlah_transaksi>1) as transaksi_2017
+                                                                                group by (transaction_year, customer_unique_id)
+                                                                                having count (customer_unique_id) > 1) as transaksi_repeat_2017_1
+group by 1
+
+
+UNION ALL
+------- c. Customers yang repeat order di 2018
+select transaction_year, count(1) as jumlah_customer_yang_melakukan_repeat_order
+                                                                                from (select transaction_year, customer_unique_id, count (customer_unique_id) as jumlah_transaksi_2018
+                                                                                from         (select * from tabel_transaksi_lengkap
+                                                                                where transaction_year = 2018 and jumlah_transaksi>1) as transaksi_2018
+                                                                                group by (transaction_year, customer_unique_id)
+                                                                                having count (customer_unique_id) > 1) as transaksi_repeat_2017_1
+group by 1
+) as repeat
+order by transaction_year) as tabel_3
+on tabel_1.year=tabel_3.transaction_year
+
+
+join
+-- 4. Rata-rata Frekuensi Order per Customer tiap Tahun
+(select transaction_year, round(avg (jumlah_transaksi),3) as rata_rata_frekuensi_order
+                                                from(select transaction_year, customer_unique_id, count(customer_unique_id) as jumlah_transaksi from tabel_transaksi_lengkap
+                                                                where transaction_year=2016
+                                                                group by (transaction_year, customer_unique_id))as transaksi_2016
+group by transaction_year
+
+
+UNION ALL
+                                                         
+select transaction_year, round(avg (jumlah_transaksi),3) as rata_rata_frekuensi_order
+                                                from(select transaction_year, customer_unique_id, count(customer_unique_id) as jumlah_transaksi from tabel_transaksi_lengkap
+                                                                where transaction_year=2017
+                                                                group by (transaction_year, customer_unique_id))as transaksi_2017
+group by transaction_year
+                                                         
+UNION ALL
+                                                         
+select transaction_year, round(avg (jumlah_transaksi),3) as rata_rata_frekuensi_order
+                                                from(select transaction_year, customer_unique_id, count(customer_unique_id) as jumlah_transaksi from tabel_transaksi_lengkap
+                                                                where transaction_year=2018
+                                                                group by (transaction_year, customer_unique_id))as transaksi_2018
+group by transaction_year) as tabel_4
+on tabel_1.year=tabel_4.transaction_year
+
+
+
+
+
+TUGAS 3: ANNUAL PRODUCT CATEGORY QUALITY ANALYSIS
+
+
+with tabel_1 as (
+--1. Mencari Revenue per Tahun
+with order_delivered as (
+        select * 
+        from orders_Dataset 
+        where order_status='delivered'
+),
+products_revenue as (
+        select 
+                order_id,
+                sum(price) as harga,
+                sum(freight_value) as ongkir 
+        from order_items_dataset
+        group by order_id
+)
+select tahun, sum(harga) + sum(ongkir) as total_revenue
+from
+(
+select date_part('year',order_purchase_timestamp) as tahun,
+        o.order_id, 
+        harga,
+        ongkir
+from order_delivered as o
+join products_revenue as pr 
+on o.order_id = pr.order_id
+) as penjualan_per_order_id
+group by tahun
+order by tahun)
+,
+
+
+tabel_2 as(
+--2. Jumlah Cancel Order per Tahun
+with order_canceled as (
+        select 
+                *,
+                date_part('year',order_purchase_timestamp) as tahun
+        from orders_Dataset 
+        where order_status='canceled'
+        )
+select 
+        tahun, 
+        count(tahun) as total_order_canceled_per_year
+from order_items_dataset as oi
+join order_canceled as oc
+on oi.order_id = oc.order_id
+group by tahun)
+,
+
+
+tabel_3 as(
+--3. Top Kategori yang Menghasilkan Revenue Terbesar per Tahun
+with order_delivered as (
+        select 
+                *, 
+                date_part('year',order_purchase_timestamp) as tahun
+        from orders_dataset 
+        where order_status='delivered'
+),
+order_produk_merge as (
+        select 
+                *
+        from (
+                select 
+                        date_part('year',order_purchase_timestamp) as tahun,
+                        o.order_id,
+                        product_id,
+                        price,
+                        freight_value
+                from orders_dataset as o
+                join order_items_dataset as oi 
+                on o.order_id = oi.order_id
+                ) as order_per_tahun
+        join products_dataset
+        on order_per_tahun.product_id=products_dataset.product_id
+)
+select tahun,product_category_name as top_category_product,total_revenue
+from (
+        select 
+                od.tahun as tahun,
+                product_category_name,
+                sum(freight_value)+sum(price) as total_revenue,
+                rank() over (partition by od.tahun order by sum(freight_value)+sum(price) desc) as pos
+        from order_delivered as od
+        join order_produk_merge as opm
+        on od.order_id=opm.order_id
+        group by od.tahun,product_category_name
+        order by tahun, total_revenue DESC
+) as ranking_penjualan_produk_per_tahun
+where pos=1
+),
+
+
+tabel_4 as(
+--4. Kategori dengan Cancel Terbanyak per Tahun
+with order_canceled as (
+        select 
+                *, 
+                date_part('year',order_purchase_timestamp) as tahun
+        from orders_dataset 
+        where order_status='canceled'
+),
+order_produk_merge as (
+        select 
+                *
+        from (
+                select 
+                        date_part('year',order_purchase_timestamp) as tahun,
+                        o.order_id,
+                        product_id,
+                        price,
+                        freight_value
+                from orders_dataset as o
+                join order_items_dataset as oi 
+                on o.order_id = oi.order_id
+                ) as order_per_tahun
+        join products_dataset
+        on order_per_tahun.product_id=products_dataset.product_id
+)
+select tahun,product_category_name as most_canceled_category_product, total_cancel_order
+from (
+        select 
+                oc.tahun as tahun,
+                product_category_name,
+                count(product_category_name) as total_cancel_order,
+                rank() over (partition by oc.tahun order by count(product_category_name) desc) as pos
+        from order_canceled as oc
+        join order_produk_merge as opm
+        on oc.order_id=opm.order_id
+        group by oc.tahun,product_category_name
+        order by tahun, total_cancel_order DESC
+) as ranking_cancel_produk_per_tahun
+where pos=1
+)
+--
+
+
+select 
+        tabel_1.tahun,
+        tabel_1.total_revenue as total_revenue_per_year,
+        total_order_canceled_per_year,
+        top_category_product,
+        tabel_3.total_revenue as total_revenue_per_top_category_product,
+        most_canceled_category_product,
+        total_cancel_order as total_cancel_order_per_most_canceled_product
+from tabel_1
+join tabel_2
+on tabel_1.tahun=tabel_2.tahun
+join tabel_3
+on tabel_1.tahun=tabel_3.tahun
+join tabel_4
+on tabel_1.tahun=tabel_4.tahun
+
+
+
+
+
+
+TUGAS 4: ANNUAL PAYMENT TYPE USAGE ANALYSIS
+
+
+with pembayaran as (
+        select 
+                *,
+                date_part('year',order_purchase_timestamp) as tahun
+        from (select * from orders_dataset   
+                  where order_status='delivered')
+        as od
+        join  payments_dataset as pd 
+        on od.order_id=pd.order_id
+)
+select 
+        payment_type,
+        count(case when tahun = 2016 then 1 else null end) as "2016",
+        count(case when tahun = 2017 then 1 else null end) as "2017",
+        count(case when tahun = 2018 then 1 else null end) as "2018"
+from pembayaran
+group by payment_type
